@@ -796,6 +796,16 @@ static int frame_encode(OutputStream *ost, AVFrame *frame, AVPacket *pkt)
         if (type == AVMEDIA_TYPE_VIDEO) {
             frame->quality   = e->enc_ctx->global_quality;
             frame->pict_type = forced_kf_apply(e, &ost->kf, frame);
+
+            if (atomic_exchange(&ost->force_keyframe_requested, 0)) {
+                frame->pict_type = AV_PICTURE_TYPE_I;
+                av_log(e, AV_LOG_WARNING,
+                       "Runtime force_keyframe: next video frame forced to I "
+                       "for output=%d stream=%d pts:%s pts_time:%s\n",
+                       ost->file->index, ost->index,
+                       av_ts2str(frame->pts),
+                       av_ts2timestr(frame->pts, &frame->time_base));
+            }
         } else {
             if (!(e->enc_ctx->codec->capabilities & AV_CODEC_CAP_PARAM_CHANGE) &&
                 e->enc_ctx->ch_layout.nb_channels != frame->ch_layout.nb_channels) {

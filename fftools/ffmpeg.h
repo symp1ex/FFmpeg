@@ -660,6 +660,12 @@ typedef struct OutputStream {
     /* packet quality factor */
     atomic_int quality;
 
+    /*
+     * Runtime request from the ffmpeg CLI control path. The encoder thread
+     * consumes this flag and marks the next video frame as an intra frame.
+     */
+    atomic_uint force_keyframe_requested;
+
     EncStats enc_stats_pre;
     EncStats enc_stats_post;
 

@@ -314,6 +314,87 @@ static int read_key(void)
     return -1;
 }
 
+static void request_runtime_keyframe(const char *arg)
+{
+    OutputStream *selected = NULL;
+    char *end = NULL;
+    long target = -1;
+
+    if (arg && *arg) {
+        while (*arg == ' ' || *arg == '\t')
+            arg++;
+        if (*arg) {
+            target = strtol(arg, &end, 10);
+            if (end == arg || (*end && *end != ' ' && *end != '\t')) {
+                av_log(NULL, AV_LOG_WARNING,
+                       "force_keyframe command ignored: invalid target '%s'\n", arg);
+                return;
+            }
+        }
+    }
+
+    for (OutputStream *ost = ost_iter(NULL); ost; ost = ost_iter(ost)) {
+        if (ost->type != AVMEDIA_TYPE_VIDEO || !ost->enc)
+            continue;
+
+        if (target >= 0 && ost->index != target)
+            continue;
+
+        atomic_store(&ost->force_keyframe_requested, 1);
+        av_log(NULL, AV_LOG_WARNING,
+               "force_keyframe command received: queued output=%d stream=%d\n",
+               ost->file->index, ost->index);
+        selected = ost;
+
+        if (target < 0)
+            break;
+    }
+
+    if (!selected)
+        av_log(NULL, AV_LOG_WARNING,
+               "force_keyframe command ignored: no matching video output stream\n");
+}
+
+static int process_runtime_command_line(const char *line)
+{
+    const char *arg;
+
+    while (*line == ' ' || *line == '\t')
+        line++;
+
+    if (!strncmp(line, "force_keyframe", 14) &&
+        (line[14] == 0 || line[14] == ' ' || line[14] == '\t')) {
+        arg = line + 14;
+        request_runtime_keyframe(arg);
+        return 1;
+    }
+
+    return 0;
+}
+
+static int process_runtime_command_key(int key)
+{
+    static char line[256];
+    static int len;
+
+    if (key < 0)
+        return 0;
+
+    if (!len && key != 'f')
+        return 0;
+
+    if (key == '\n' || key == '\r') {
+        line[len] = 0;
+        len = 0;
+        return process_runtime_command_line(line);
+    }
+
+    if (len < sizeof(line) - 1)
+        line[len++] = key;
+
+    return 1;
+}
+
 static int decode_interrupt_cb(void *ctx)
 {
     return received_nb_signals > atomic_load(&transcode_init_done);
@@ -839,54 +920,63 @@ static int check_keyboard_interaction(int64_t cur_time)
         last_time = cur_time;
     }else
         key = -1;
-    if (key == 'q') {
-        av_log(NULL, AV_LOG_INFO, "\n\n[q] command received. Exiting.\n\n");
-        return AVERROR_EXIT;
-    }
-    if (key == '+') av_log_set_level(av_log_get_level()+10);
-    if (key == '-') av_log_set_level(av_log_get_level()-10);
-    if (key == 'c' || key == 'C'){
-        char buf[4096], target[64], command[256], arg[256] = {0};
-        double time;
-        int k, n = 0;
-        fprintf(stderr, "\nEnter command: <target>|all <time>|-1 <command>[ <argument>]\n");
-        i = 0;
-        set_tty_echo(1);
-        while ((k = read_key()) != '\n' && k != '\r' && i < sizeof(buf)-1)
-            if (k > 0)
-                buf[i++] = k;
-        buf[i] = 0;
-        set_tty_echo(0);
-        fprintf(stderr, "\n");
-        if (k > 0 &&
-            (n = sscanf(buf, "%63[^ ] %lf %255[^ ] %255[^\n]", target, &time, command, arg)) >= 3) {
-            av_log(NULL, AV_LOG_DEBUG, "Processing command target:%s time:%f command:%s arg:%s",
-                   target, time, command, arg);
-            for (OutputStream *ost = ost_iter(NULL); ost; ost = ost_iter(ost)) {
-                if (ost->fg_simple)
-                    fg_send_command(ost->fg_simple, time, target, command, arg,
-                                    key == 'C');
-            }
-            for (i = 0; i < nb_filtergraphs; i++)
-                fg_send_command(filtergraphs[i], time, target, command, arg,
-                                key == 'C');
-        } else {
-            av_log(NULL, AV_LOG_ERROR,
-                   "Parse error, at least 3 arguments were expected, "
-                   "only %d given in string '%s'\n", n, buf);
+    while (key >= 0) {
+        if (process_runtime_command_key(key)) {
+            key = read_key();
+            continue;
         }
-    }
-    if (key == '?'){
-        fprintf(stderr, "key    function\n"
-                        "?      show this help\n"
-                        "+      increase verbosity\n"
-                        "-      decrease verbosity\n"
-                        "c      Send command to first matching filter supporting it\n"
-                        "C      Send/Queue command to all matching filters\n"
-                        "h      dump packets/hex press to cycle through the 3 states\n"
-                        "q      quit\n"
-                        "s      Show QP histogram\n"
-        );
+        if (key == 'q') {
+            av_log(NULL, AV_LOG_INFO, "\n\n[q] command received. Exiting.\n\n");
+            return AVERROR_EXIT;
+        }
+        if (key == '+') av_log_set_level(av_log_get_level()+10);
+        if (key == '-') av_log_set_level(av_log_get_level()-10);
+        if (key == 'c' || key == 'C'){
+            char buf[4096], target[64], command[256], arg[256] = {0};
+            double time;
+            int k, n = 0;
+            fprintf(stderr, "\nEnter command: <target>|all <time>|-1 <command>[ <argument>]\n");
+            i = 0;
+            set_tty_echo(1);
+            while ((k = read_key()) != '\n' && k != '\r' && i < sizeof(buf)-1)
+                if (k > 0)
+                    buf[i++] = k;
+            buf[i] = 0;
+            set_tty_echo(0);
+            fprintf(stderr, "\n");
+            if (k > 0 &&
+                (n = sscanf(buf, "%63[^ ] %lf %255[^ ] %255[^\n]", target, &time, command, arg)) >= 3) {
+                av_log(NULL, AV_LOG_DEBUG, "Processing command target:%s time:%f command:%s arg:%s",
+                       target, time, command, arg);
+                for (OutputStream *ost = ost_iter(NULL); ost; ost = ost_iter(ost)) {
+                    if (ost->fg_simple)
+                        fg_send_command(ost->fg_simple, time, target, command, arg,
+                                        key == 'C');
+                }
+                for (i = 0; i < nb_filtergraphs; i++)
+                    fg_send_command(filtergraphs[i], time, target, command, arg,
+                                    key == 'C');
+            } else {
+                av_log(NULL, AV_LOG_ERROR,
+                       "Parse error, at least 3 arguments were expected, "
+                       "only %d given in string '%s'\n", n, buf);
+            }
+        }
+        if (key == '?'){
+            fprintf(stderr, "key    function\n"
+                            "?      show this help\n"
+                            "+      increase verbosity\n"
+                            "-      decrease verbosity\n"
+                            "force_keyframe[ stream_index]\n"
+                            "       force next frame on the first/matching video output to be a keyframe\n"
+                            "c      Send command to first matching filter supporting it\n"
+                            "C      Send/Queue command to all matching filters\n"
+                            "h      dump packets/hex press to cycle through the 3 states\n"
+                            "q      quit\n"
+                            "s      Show QP histogram\n"
+            );
+        }
+        key = read_key();
     }
     return 0;
 }
