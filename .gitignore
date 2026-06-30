@@ -47,7 +47,7 @@
 /config.h
 /config_components.asm
 /config_components.h
-/coverage.info
+/coverage.info``
 /lcov/
 /src
 /mapfile
@@ -56,3 +56,4 @@
 /libavfilter/vulkan/*.c
 /.*/
 !/.forgejo/
+_reports.md
