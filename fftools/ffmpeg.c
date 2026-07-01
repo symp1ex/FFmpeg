@@ -915,7 +915,7 @@ static int check_keyboard_interaction(int64_t cur_time)
     int i, key;
     static int64_t last_time;
     /* read_key() returns 0 on EOF */
-    if (cur_time - last_time >= 100000) {
+    if (cur_time - last_time >= 10000) {
         key =  read_key();
         last_time = cur_time;
     }else
