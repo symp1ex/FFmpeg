@@ -266,6 +266,30 @@ static int scale_d3d11_filter_frame(AVFilterLink *inlink, AVFrame *in)
         goto fail;
     }
 
+    if (frames_ctx->sw_format == AV_PIX_FMT_BGRA ||
+        frames_ctx->sw_format == AV_PIX_FMT_X2BGR10 ||
+        frames_ctx->sw_format == AV_PIX_FMT_RGBAF16) {
+        D3D11_VIDEO_PROCESSOR_COLOR_SPACE input_color_space = {
+            .Usage = 0,
+            .RGB_Range = 0,
+            .YCbCr_Matrix = 1,
+            .YCbCr_xvYCC = 0,
+            .Nominal_Range = 2,
+        };
+        D3D11_VIDEO_PROCESSOR_COLOR_SPACE output_color_space = {
+            .Usage = 0,
+            .RGB_Range = 0,
+            .YCbCr_Matrix = 1,
+            .YCbCr_xvYCC = 0,
+            .Nominal_Range = 1,
+        };
+
+        videoContext->lpVtbl->VideoProcessorSetStreamColorSpace(videoContext, s->processor,
+                                                                 0, &input_color_space);
+        videoContext->lpVtbl->VideoProcessorSetOutputColorSpace(videoContext, s->processor,
+                                                                 &output_color_space);
+    }
+
     ///< Process the frame
     hr = videoContext->lpVtbl->VideoProcessorBlt(videoContext, s->processor, s->outputView, 0, 1, &stream);
     if (FAILED(hr)) {
@@ -286,6 +310,12 @@ static int scale_d3d11_filter_frame(AVFilterLink *inlink, AVFrame *in)
     out->width = s->width;
     out->height = s->height;
     out->format = AV_PIX_FMT_D3D11;
+    if (s->format == AV_PIX_FMT_NV12 || s->format == AV_PIX_FMT_P010) {
+        out->color_range     = AVCOL_RANGE_MPEG;
+        out->color_primaries = AVCOL_PRI_BT709;
+        out->color_trc       = AVCOL_TRC_BT709;
+        out->colorspace      = AVCOL_SPC_BT709;
+    }
 
     ///< Clean up resources
     inputView->lpVtbl->Release(inputView);
@@ -380,14 +410,11 @@ static int scale_d3d11_config_props(AVFilterLink *outlink)
     frames_ctx->sw_format = s->format;
     frames_ctx->width = s->width;
     frames_ctx->height = s->height;
-    frames_ctx->initial_pool_size = 10;
-
-    if (ctx->extra_hw_frames > 0)
-        frames_ctx->initial_pool_size += ctx->extra_hw_frames;
+    frames_ctx->initial_pool_size = 0;
 
     AVD3D11VAFramesContext *frames_hwctx = frames_ctx->hwctx;
     frames_hwctx->MiscFlags = 0;
-    frames_hwctx->BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_VIDEO_ENCODER;
+    frames_hwctx->BindFlags = D3D11_BIND_RENDER_TARGET;
 
     ret = av_hwframe_ctx_init(s->hw_frames_ctx_out);
     if (ret < 0) {

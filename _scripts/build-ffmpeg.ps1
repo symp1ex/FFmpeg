@@ -57,7 +57,7 @@ $ConfigureArgs = @(
     "--enable-libvpx",
     "--enable-mediafoundation",
     "--enable-encoder=libvpx_vp8,h264_mf,av1_mf",
-    "--enable-filter=ddagrab,hwdownload,format",
+    "--enable-filter=ddagrab,hwdownload,format,scale_d3d11",
     "--enable-muxer=ivf,h264",
     "--enable-indev=lavfi",
     "--enable-protocol=pipe",

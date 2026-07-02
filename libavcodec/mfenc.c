@@ -633,6 +633,17 @@ static int mf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
     IMFSample *sample = NULL;
     int ret;
 
+    if (c->sample_sent) {
+        ret = mf_receive_sample(avctx, &sample);
+        if (ret >= 0) {
+            ret = mf_sample_to_avpacket(avctx, sample, avpkt);
+            IMFSample_Release(sample);
+            return ret;
+        }
+        if (ret != AVERROR(EAGAIN))
+            return ret;
+    }
+
     if (!c->frame->buf[0]) {
         ret = ff_encode_get_frame(avctx, c->frame);
         if (ret < 0 && ret != AVERROR_EOF)
@@ -1277,6 +1288,13 @@ static int mf_init_encoder(AVCodecContext *avctx)
     if (!FAILED(hr))
         av_log(avctx, AV_LOG_VERBOSE, "MFT supports ICodecAPI.\n");
 
+    if (c->is_video && avctx->pix_fmt == AV_PIX_FMT_D3D11 && avctx->hw_frames_ctx) {
+        AVHWFramesContext *frames_ctx = (AVHWFramesContext*)avctx->hw_frames_ctx->data;
+
+        c->device_hwctx = (AVD3D11VADeviceContext*)frames_ctx->device_ctx->hwctx;
+        if ((ret = initialize_dxgi_manager(avctx)) < 0)
+            return ret;
+    }
 
     hr = IMFTransform_GetStreamIDs(c->mft, 1, &c->in_stream_id, 1, &c->out_stream_id);
     if (hr == E_NOTIMPL) {

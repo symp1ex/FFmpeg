@@ -314,6 +314,8 @@ static int read_key(void)
     return -1;
 }
 
+#define STDIN_POLL_INTERVAL_US 10000
+
 static void request_runtime_keyframe(const char *arg)
 {
     OutputStream *selected = NULL;
@@ -915,7 +917,7 @@ static int check_keyboard_interaction(int64_t cur_time)
     int i, key;
     static int64_t last_time;
     /* read_key() returns 0 on EOF */
-    if (cur_time - last_time >= 10000) {
+    if (cur_time - last_time >= STDIN_POLL_INTERVAL_US) {
         key =  read_key();
         last_time = cur_time;
     }else
@@ -1003,7 +1005,9 @@ static int transcode(Scheduler *sch)
 
     timer_start = av_gettime_relative();
 
-    while (!sch_wait(sch, stats_period, &transcode_ts)) {
+    while (!sch_wait(sch, stdin_interaction && stats_period > STDIN_POLL_INTERVAL_US ?
+                     STDIN_POLL_INTERVAL_US : stats_period,
+                     &transcode_ts)) {
         int64_t cur_time= av_gettime_relative();
 
         if (received_nb_signals)
