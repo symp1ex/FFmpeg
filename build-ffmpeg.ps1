@@ -52,8 +52,6 @@ $ConfigureArgs = @(
     "--prefix=$PrefixMsys",
     "--target-os=win64",
     "--arch=x86_64",
-    "--enable-gpl",
-    "--enable-version3",
     "--enable-libvpx",
     "--enable-mediafoundation",
     "--enable-encoder=libvpx_vp8,h264_mf,av1_mf",
