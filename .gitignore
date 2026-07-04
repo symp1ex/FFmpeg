@@ -57,3 +57,6 @@
 /.*/
 !/.forgejo/
 _reports.md
+_ffmpeg_build_work/
+_ffmpeg_install/
+build_local_ffmpeg_shared.generated.sh
