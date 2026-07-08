@@ -135,11 +135,14 @@ $ConfigureArgs = @(
     "--disable-ffplay",
     "--disable-ffprobe",
     "--enable-ffmpeg",
+	
+	"--enable-gpl",
 
     "--enable-d3d11va",
     "--enable-dxva2",
     "--enable-mediafoundation",
     "--enable-libvpx",
+	"--enable-libx264",
 
     "--enable-indev=lavfi",
 
@@ -157,6 +160,7 @@ $ConfigureArgs = @(
     "--enable-encoder=libvpx_vp8",
     "--enable-encoder=h264_mf",
     "--enable-encoder=av1_mf",
+	"--enable-encoder=libx264",
 
     "--enable-muxer=ivf",
     "--enable-muxer=h264",
@@ -269,6 +273,14 @@ $RequiredRuntimeDlls = @(
     "zlib1.dll"
 )
 
+$X264Dll = Get-ChildItem -Path $UcrtBin -Filter "libx264-*.dll" -File | Select-Object -First 1
+if ($null -eq $X264Dll) {
+    throw "Required runtime DLL was not found: libx264-*.dll in $UcrtBin"
+}
+
+Copy-Item -Force $X264Dll.FullName (Join-Path $OutputDir $X264Dll.Name)
+Write-Host "Copied runtime DLL: $($X264Dll.Name)"
+
 foreach ($Dll in $RequiredRuntimeDlls) {
     Copy-RequiredDll -DllName $Dll -SourceDir $UcrtBin -DestinationDir $OutputDir -Required
 }
@@ -285,7 +297,7 @@ if ($EnableSVTAV1) {
 }
 
 $Encoders = (& $BuiltExe -hide_banner -encoders) -join "`n"
-foreach ($Encoder in @("libvpx", "h264_mf", "av1_mf")) {
+foreach ($Encoder in @("libvpx", "libx264", "h264_mf", "av1_mf")) {
     if ($Encoders -notmatch [regex]::Escape($Encoder)) {
         throw "Built ffmpeg.exe is missing encoder $Encoder"
     }
