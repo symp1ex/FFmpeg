@@ -124,8 +124,11 @@ $ConfigureArgs = @(
     "--target-os=mingw32",
     "--arch=x86_64",
 
-    "--disable-static",
-    "--enable-shared",
+    "--enable-static",
+    "--disable-shared",
+    "--pkg-config-flags=--static",
+    "--extra-ldflags='-static -static-libgcc -static-libstdc++'",
+
     "--disable-autodetect",
     "--disable-debug",
     "--disable-doc",
@@ -136,14 +139,14 @@ $ConfigureArgs = @(
     "--disable-ffplay",
     "--disable-ffprobe",
     "--enable-ffmpeg",
-	
-	"--enable-gpl",
+
+    "--enable-gpl",
 
     "--enable-d3d11va",
     "--enable-dxva2",
     "--enable-mediafoundation",
     "--enable-libvpx",
-	"--enable-libx264",
+    "--enable-libx264",
 
     "--enable-indev=lavfi",
 
@@ -161,7 +164,7 @@ $ConfigureArgs = @(
     "--enable-encoder=libvpx_vp8",
     "--enable-encoder=h264_mf",
     "--enable-encoder=av1_mf",
-	"--enable-encoder=libx264",
+    "--enable-encoder=libx264",
 
     "--enable-muxer=ivf",
     "--enable-muxer=h264",
@@ -171,24 +174,68 @@ $ConfigureArgs = @(
     "--enable-indev=gdigrab"
 )
 
-if ($EnableSVTAV1) {
+if ($EnableSVTAV1.IsPresent) {
     $ConfigureArgs += @(
         "--enable-libsvtav1",
         "--enable-encoder=libsvtav1"
     )
 }
 
-if ($EnableAOMAV1) {
+if ($EnableAOMAV1.IsPresent) {
     $ConfigureArgs += @(
         "--enable-libaom",
         "--enable-encoder=libaom_av1"
     )
 }
 
+$UcrtLib = Join-Path $Msys2Root "ucrt64\lib"
+
+$RequiredStaticLibs = @(
+    "libvpx.a",
+    "libx264.a",
+    "libz.a"
+)
+
+if ($EnableSVTAV1.IsPresent) {
+    $RequiredStaticLibs += "libSvtAv1Enc.a"
+}
+
+if ($EnableAOMAV1.IsPresent) {
+    $RequiredStaticLibs += "libaom.a"
+}
+
+foreach ($Lib in $RequiredStaticLibs) {
+    $LibPath = Join-Path $UcrtLib $Lib
+
+    if (!(Test-Path $LibPath)) {
+        throw "Required static library was not found: $LibPath"
+    }
+
+    Write-Host "Static library found: $Lib"
+}
+
+if ($EnableSVTAV1.IsPresent) {
+    & $Bash -lc "PKG_CONFIG_PATH=/ucrt64/lib/pkgconfig pkg-config --exists --static SvtAv1Enc"
+    if ($LASTEXITCODE -ne 0) {
+        throw "pkg-config could not find static SvtAv1Enc. Check C:\msys64\ucrt64\lib\pkgconfig\SvtAv1Enc.pc"
+    }
+
+    Write-Host "pkg-config static package found: SvtAv1Enc"
+}
+
+if ($EnableAOMAV1.IsPresent) {
+    & $Bash -lc "PKG_CONFIG_PATH=/ucrt64/lib/pkgconfig pkg-config --exists --static aom"
+    if ($LASTEXITCODE -ne 0) {
+        throw "pkg-config could not find static aom. Check C:\msys64\ucrt64\lib\pkgconfig\aom.pc"
+    }
+
+    Write-Host "pkg-config static package found: aom"
+}
+
 $ConfigureLine = "./configure " + ($ConfigureArgs -join " ")
 
 # Keep the generated build script outside _ffmpeg_build too.
-$BuildScriptPath = Join-Path $RepoRoot "build_local_ffmpeg_shared.generated.sh"
+$BuildScriptPath = Join-Path $RepoRoot "build_local_ffmpeg_static.generated.sh"
 
 $Script = @"
 set -euo pipefail
@@ -227,7 +274,6 @@ if [ ! -f "$PrefixMsys/bin/ffmpeg.exe" ]; then
 fi
 
 strip "$PrefixMsys/bin/ffmpeg.exe" 2>/dev/null || true
-strip "$PrefixMsys/bin"/*.dll 2>/dev/null || true
 
 mkdir -p "$OutputMsys"
 
@@ -235,7 +281,6 @@ mkdir -p "$OutputMsys"
 rm -rf "$OutputMsys"/*
 
 cp -f "$PrefixMsys/bin/ffmpeg.exe" "$OutputMsys/ffmpeg.exe"
-cp -f "$PrefixMsys/bin"/*.dll "$OutputMsys/" 2>/dev/null || true
 
 echo ""
 echo "Configured linkage:"
@@ -252,7 +297,7 @@ grep -E 'CONFIG_(DDAGRAB|HWDOWNLOAD|SCALE|SCALE_D3D11|FORMAT|NULL|LUTRGB)_FILTER
 
 Save-TextUtf8NoBom -Path $BuildScriptPath -Text $Script
 
-Write-Host "Building minimal shared FFmpeg from local source: $FfmpegSource"
+Write-Host "Building minimal static FFmpeg from local source: $FfmpegSource"
 Write-Host "Final output directory: $OutputDir"
 Write-Host "Install prefix: $InstallPrefix"
 Write-Host "SVT-AV1 enabled: $($EnableSVTAV1.IsPresent)"
@@ -270,58 +315,6 @@ if (!(Test-Path $BuiltExe)) {
     throw "Build finished but ffmpeg.exe was not found at $BuiltExe"
 }
 
-$UcrtBin = Join-Path $Msys2Root "ucrt64\bin"
-
-# Required runtime DLLs copied immediately into _ffmpeg_build.
-$RequiredRuntimeDlls = @(
-    "libgcc_s_seh-1.dll",
-    "libiconv-2.dll",
-    "libstdc++-6.dll",
-    "libvpx-1.dll",
-    "libwinpthread-1.dll",
-    "zlib1.dll"
-)
-
-$X264Dll = Get-ChildItem -Path $UcrtBin -Filter "libx264-*.dll" -File | Select-Object -First 1
-if ($null -eq $X264Dll) {
-    throw "Required runtime DLL was not found: libx264-*.dll in $UcrtBin"
-}
-
-Copy-Item -Force $X264Dll.FullName (Join-Path $OutputDir $X264Dll.Name)
-Write-Host "Copied runtime DLL: $($X264Dll.Name)"
-
-foreach ($Dll in $RequiredRuntimeDlls) {
-    Copy-RequiredDll -DllName $Dll -SourceDir $UcrtBin -DestinationDir $OutputDir -Required
-}
-
-# SVT-AV1 runtime is only allowed when -EnableSVTAV1 is explicitly used.
-if ($EnableSVTAV1) {
-    Copy-RequiredDll -DllName "libSvtAv1Enc-4.dll" -SourceDir $UcrtBin -DestinationDir $OutputDir -Required
-} else {
-    $SvtDllInOutput = Join-Path $OutputDir "libSvtAv1Enc-4.dll"
-    if (Test-Path $SvtDllInOutput) {
-        Remove-Item -Force $SvtDllInOutput
-        Write-Host "Removed libSvtAv1Enc-4.dll because -EnableSVTAV1 was not specified."
-    }
-}
-
-# libaom AV1 runtime is only allowed when -EnableAOMAV1 is explicitly used.
-if ($EnableAOMAV1) {
-    $AomDll = Get-ChildItem -Path $UcrtBin -Filter "libaom*.dll" -File | Select-Object -First 1
-
-    if ($null -eq $AomDll) {
-        throw "Required runtime DLL was not found: libaom*.dll in $UcrtBin"
-    }
-
-    Copy-Item -Force $AomDll.FullName (Join-Path $OutputDir $AomDll.Name)
-    Write-Host "Copied runtime DLL: $($AomDll.Name)"
-} else {
-    Get-ChildItem -Path $OutputDir -Filter "libaom*.dll" -File -ErrorAction SilentlyContinue |
-        Remove-Item -Force
-
-    Write-Host "Removed libaom*.dll because -EnableAOMAV1 was not specified."
-}
-
 $Encoders = (& $BuiltExe -hide_banner -encoders) -join "`n"
 foreach ($Encoder in @("libvpx", "libx264", "h264_mf", "av1_mf")) {
     if ($Encoders -notmatch [regex]::Escape($Encoder)) {
@@ -329,13 +322,13 @@ foreach ($Encoder in @("libvpx", "libx264", "h264_mf", "av1_mf")) {
     }
 }
 
-if ($EnableSVTAV1) {
+if ($EnableSVTAV1.IsPresent) {
     if ($Encoders -notmatch [regex]::Escape("libsvtav1")) {
         throw "Built ffmpeg.exe is missing encoder libsvtav1"
     }
 }
 
-if ($EnableAOMAV1) {
+if ($EnableAOMAV1.IsPresent) {
     if ($Encoders -notmatch [regex]::Escape("libaom-av1")) {
         throw "Built ffmpeg.exe is missing encoder libaom-av1"
     }
@@ -349,22 +342,30 @@ foreach ($Device in @("gdigrab", "lavfi")) {
     }
 }
 
+$LddOutput = (& $Bash -lc "ldd '$(Convert-ToMsysPath $BuiltExe)'") -join "`n"
+
+Write-Host ""
+Write-Host "Runtime dependencies:"
+Write-Host $LddOutput
+
+if ($LddOutput -match "msys|ucrt64|libgcc|libstdc\+\+|libwinpthread|libvpx|libx264|libaom|SvtAv1") {
+    throw "ffmpeg.exe still depends on MSYS2/UCRT runtime DLLs. Some dependency was linked dynamically instead of statically."
+}
+
 # Safety cleanup: keep only ffmpeg.exe and DLL files in _ffmpeg_build.
 Get-ChildItem -Path $OutputDir -Force |
     Where-Object {
         $_.PSIsContainer -or
-        ($_.Extension.ToLowerInvariant() -ne ".exe" -and $_.Extension.ToLowerInvariant() -ne ".dll")
+        $_.Name -ne "ffmpeg.exe"
     } |
     Remove-Item -Recurse -Force
 
 Write-Host ""
 Write-Host "Copied files:"
-Get-ChildItem -Path $OutputDir -File -Include *.exe,*.dll |
-    Sort-Object Name |
+Get-ChildItem -Path $OutputDir -File -Filter "ffmpeg.exe" |
     Select-Object Name, Length |
     Format-Table -AutoSize
 
 Write-Host ""
-Write-Host "FFmpeg minimal shared build completed."
-Write-Host "Keep ffmpeg.exe and all DLL files together."
-Write-Host "Final output: $OutputDir"
+Write-Host "FFmpeg static single-exe build completed."
+Write-Host "Final output: $BuiltExe"
