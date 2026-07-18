@@ -59,5 +59,7 @@
 _reports.md
 _ffmpeg_build_work/
 _ffmpeg_install/
+_ffmpeg_manifest/
+_fork/
 build_local_ffmpeg_shared.generated.sh
 build_local_ffmpeg_static.generated.sh

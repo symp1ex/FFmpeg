@@ -93,6 +93,7 @@ typedef struct DdagrabContext {
     ID3D11BlendState *blend_state;
     ID3D11BlendState *blend_state_xor;
 
+    int        adapter_idx;
     int        output_idx;
     int        draw_mouse;
     AVRational framerate;

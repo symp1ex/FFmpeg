@@ -118,6 +118,70 @@ $env:TMP = $MsysTmp
 $env:TEMP = $MsysTmp
 $env:PATH = (Join-Path $Msys2Root "ucrt64\bin") + ";" + (Join-Path $Msys2Root "usr\bin") + ";" + $env:PATH
 
+# Build the Windows application manifest as a COFF resource object.
+# The object is linked directly into ffmpeg.exe.
+$ManifestBuildDir = Join-Path $RepoRoot "_ffmpeg_manifest"
+$ManifestPath = Join-Path $ManifestBuildDir "ffmpeg.exe.manifest"
+$ManifestRcPath = Join-Path $ManifestBuildDir "ffmpeg-manifest.rc"
+$ManifestObjectPath = Join-Path $ManifestBuildDir "ffmpeg-manifest.o"
+$Windres = Join-Path $Msys2Root "ucrt64\bin\windres.exe"
+
+if (!(Test-Path $Windres)) {
+    throw "MSYS2 windres was not found at $Windres. Install the mingw-w64-ucrt-x86_64-toolchain package."
+}
+
+New-Item -ItemType Directory -Force -Path $ManifestBuildDir | Out-Null
+
+$ManifestXml = @'
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">
+        PerMonitorV2
+      </dpiAwareness>
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">
+        true/pm
+      </dpiAware>
+    </windowsSettings>
+  </application>
+</assembly>
+'@
+
+Save-TextUtf8NoBom -Path $ManifestPath -Text $ManifestXml
+
+# windres reads the manifest path from the RC file.
+# Forward slashes are used so that the absolute Windows path is parsed correctly.
+$ManifestPathForRc = [System.IO.Path]::GetFullPath($ManifestPath).Replace("\", "/")
+
+$ManifestRc = @"
+1 24 "$ManifestPathForRc"
+"@
+
+Save-TextUtf8NoBom -Path $ManifestRcPath -Text $ManifestRc
+
+Remove-Item -Force -ErrorAction SilentlyContinue $ManifestObjectPath
+
+& $Windres `
+    --input-format=rc `
+    --output-format=coff `
+    --target=pe-x86-64 `
+    --input=$ManifestRcPath `
+    --output=$ManifestObjectPath
+
+if ($LASTEXITCODE -ne 0) {
+    throw "Failed to compile the FFmpeg Windows manifest. windres exit code: $LASTEXITCODE"
+}
+
+if (!(Test-Path $ManifestObjectPath)) {
+    throw "windres completed but the manifest object was not created: $ManifestObjectPath"
+}
+
+$ManifestObjectMsys = Convert-ToMsysPath $ManifestObjectPath
+
+Write-Host "FFmpeg manifest created: $ManifestPath"
+Write-Host "FFmpeg manifest resource object created: $ManifestObjectPath"
+
 # Minimal shared/DLL FFmpeg build for rdagent.
 $ConfigureArgs = @(
     "--prefix=$PrefixMsys",
@@ -127,7 +191,7 @@ $ConfigureArgs = @(
     "--enable-static",
     "--disable-shared",
     "--pkg-config-flags=--static",
-    "--extra-ldflags='-static -static-libgcc -static-libstdc++'",
+    "--extra-ldflags='-static -static-libgcc -static-libstdc++ $ManifestObjectMsys'",
 
     "--disable-autodetect",
     "--disable-debug",
@@ -304,6 +368,9 @@ Write-Host "SVT-AV1 enabled: $($EnableSVTAV1.IsPresent)"
 Write-Host "libaom AV1 enabled: $($EnableAOMAV1.IsPresent)"
 Write-Host "Dependencies: MSYS2 UCRT64 toolchain, nasm, pkgconf/pkg-config, make, libvpx, Windows SDK MediaFoundation headers/libs."
 Write-Host "Generated MSYS2 build script: $BuildScriptPath"
+Write-Host "Windows manifest: $ManifestPath"
+Write-Host "Windows manifest object: $ManifestObjectPath"
+Write-Host "Windows DPI awareness: PerMonitorV2"
 
 & $Bash -lc "bash '$(Convert-ToMsysPath $BuildScriptPath)'"
 if ($LASTEXITCODE -ne 0) {
@@ -366,6 +433,16 @@ Get-ChildItem -Path $OutputDir -File -Filter "ffmpeg.exe" |
     Select-Object Name, Length |
     Format-Table -AutoSize
 
+if (!(Test-Path $ManifestPath)) {
+    throw "FFmpeg build completed but the source manifest was not found: $ManifestPath"
+}
+
+if (!(Test-Path $ManifestObjectPath)) {
+    throw "FFmpeg build completed but the compiled manifest object was not found: $ManifestObjectPath"
+}
+
 Write-Host ""
 Write-Host "FFmpeg static single-exe build completed."
 Write-Host "Final output: $BuiltExe"
+Write-Host "Embedded manifest source: $ManifestPath"
+Write-Host "Embedded DPI awareness: PerMonitorV2"
