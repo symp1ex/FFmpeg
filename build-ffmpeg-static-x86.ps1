@@ -43,7 +43,7 @@ if ($Jobs -le 0) {
 
 $Bash = Join-Path $Msys2Root "usr\bin\bash.exe"
 if (!(Test-Path $Bash)) {
-    throw "MSYS2 bash was not found at $Bash. Install MSYS2, then install mingw-w64-ucrt-x86_64-toolchain, nasm, pkgconf, make, and libvpx."
+    throw "MSYS2 bash was not found at $Bash. Install MSYS2, then install the MINGW32 x86 toolchain, nasm, pkgconf, make, and libvpx."
 }
 
 if (!(Test-Path (Join-Path $FfmpegSource "configure"))) {
@@ -116,7 +116,7 @@ $env:HOME = $MsysHome
 $env:TMPDIR = $MsysTmp
 $env:TMP = $MsysTmp
 $env:TEMP = $MsysTmp
-$env:PATH = (Join-Path $Msys2Root "ucrt64\bin") + ";" + (Join-Path $Msys2Root "usr\bin") + ";" + $env:PATH
+$env:PATH = (Join-Path $Msys2Root "mingw32\bin") + ";" + (Join-Path $Msys2Root "usr\bin") + ";" + $env:PATH
 
 # Build the Windows application manifest as a COFF resource object.
 # The object is linked directly into ffmpeg.exe.
@@ -124,10 +124,10 @@ $ManifestBuildDir = Join-Path $RepoRoot "_ffmpeg_manifest"
 $ManifestPath = Join-Path $ManifestBuildDir "ffmpeg.exe.manifest"
 $ManifestRcPath = Join-Path $ManifestBuildDir "ffmpeg-manifest.rc"
 $ManifestObjectPath = Join-Path $ManifestBuildDir "ffmpeg-manifest.o"
-$Windres = Join-Path $Msys2Root "ucrt64\bin\windres.exe"
+$Windres = Join-Path $Msys2Root "mingw32\bin\windres.exe"
 
 if (!(Test-Path $Windres)) {
-    throw "MSYS2 windres was not found at $Windres. Install the mingw-w64-ucrt-x86_64-toolchain package."
+    throw "MSYS2 windres was not found at $Windres. Install the MSYS2 MINGW32 x86 toolchain."
 }
 
 New-Item -ItemType Directory -Force -Path $ManifestBuildDir | Out-Null
@@ -165,7 +165,7 @@ Remove-Item -Force -ErrorAction SilentlyContinue $ManifestObjectPath
 & $Windres `
     --input-format=rc `
     --output-format=coff `
-    --target=pe-x86-64 `
+    --target=pe-i386 `
     --input=$ManifestRcPath `
     --output=$ManifestObjectPath
 
@@ -186,7 +186,7 @@ Write-Host "FFmpeg manifest resource object created: $ManifestObjectPath"
 $ConfigureArgs = @(
     "--prefix=$PrefixMsys",
     "--target-os=mingw32",
-    "--arch=x86_64",
+    "--arch=x86",
 
     "--enable-static",
     "--disable-shared",
@@ -211,15 +211,8 @@ $ConfigureArgs = @(
     "--enable-mediafoundation",
     "--enable-libvpx",
     "--enable-libx264",
-    "--enable-libopus",
 
     "--enable-indev=lavfi",
-
-    "--enable-demuxer=pcm_f32le",
-    "--enable-demuxer=pcm_s32le",
-    "--enable-demuxer=pcm_s24le",
-    "--enable-demuxer=pcm_s16le",
-    "--enable-demuxer=pcm_u8",
 
     "--enable-filter=ddagrab",
     "--enable-filter=hwdownload",
@@ -228,26 +221,17 @@ $ConfigureArgs = @(
     "--enable-filter=format",
     "--enable-filter=null",
     "--enable-filter=lutrgb",
-    "--enable-filter=aresample",
     "--enable-swscale",
-    "--enable-swresample",
 
     "--enable-decoder=wrapped_avframe",
-    "--enable-decoder=pcm_f32le",
-    "--enable-decoder=pcm_s32le",
-    "--enable-decoder=pcm_s24le",
-    "--enable-decoder=pcm_s16le",
-    "--enable-decoder=pcm_u8",
 
     "--enable-encoder=libvpx_vp8",
     "--enable-encoder=h264_mf",
     "--enable-encoder=av1_mf",
     "--enable-encoder=libx264",
-    "--enable-encoder=libopus",
 
     "--enable-muxer=ivf",
     "--enable-muxer=h264",
-    "--enable-muxer=opus",
     "--enable-protocol=pipe",
 
     "--enable-indev=lavfi",
@@ -268,12 +252,11 @@ if ($EnableAOMAV1.IsPresent) {
     )
 }
 
-$UcrtLib = Join-Path $Msys2Root "ucrt64\lib"
+$Mingw32Lib = Join-Path $Msys2Root "mingw32\lib"
 
 $RequiredStaticLibs = @(
     "libvpx.a",
     "libx264.a",
-    "libopus.a",
     "libz.a"
 )
 
@@ -286,7 +269,7 @@ if ($EnableAOMAV1.IsPresent) {
 }
 
 foreach ($Lib in $RequiredStaticLibs) {
-    $LibPath = Join-Path $UcrtLib $Lib
+    $LibPath = Join-Path $Mingw32Lib $Lib
 
     if (!(Test-Path $LibPath)) {
         throw "Required static library was not found: $LibPath"
@@ -295,26 +278,19 @@ foreach ($Lib in $RequiredStaticLibs) {
     Write-Host "Static library found: $Lib"
 }
 
-& $Bash -lc "PKG_CONFIG_PATH=/ucrt64/lib/pkgconfig pkg-config --exists --static opus"
-if ($LASTEXITCODE -ne 0) {
-    throw "pkg-config could not find static opus. Check C:\msys64\ucrt64\lib\pkgconfig\opus.pc"
-}
-
-Write-Host "pkg-config static package found: opus"
-
 if ($EnableSVTAV1.IsPresent) {
-    & $Bash -lc "PKG_CONFIG_PATH=/ucrt64/lib/pkgconfig pkg-config --exists --static SvtAv1Enc"
+    & $Bash -lc "PKG_CONFIG_PATH=/mingw32/lib/pkgconfig pkg-config --exists --static SvtAv1Enc"
     if ($LASTEXITCODE -ne 0) {
-        throw "pkg-config could not find static SvtAv1Enc. Check C:\msys64\ucrt64\lib\pkgconfig\SvtAv1Enc.pc"
+        throw "pkg-config could not find static SvtAv1Enc. Check C:\msys64\mingw32\lib\pkgconfig\SvtAv1Enc.pc"
     }
 
     Write-Host "pkg-config static package found: SvtAv1Enc"
 }
 
 if ($EnableAOMAV1.IsPresent) {
-    & $Bash -lc "PKG_CONFIG_PATH=/ucrt64/lib/pkgconfig pkg-config --exists --static aom"
+    & $Bash -lc "PKG_CONFIG_PATH=/mingw32/lib/pkgconfig pkg-config --exists --static aom"
     if ($LASTEXITCODE -ne 0) {
-        throw "pkg-config could not find static aom. Check C:\msys64\ucrt64\lib\pkgconfig\aom.pc"
+        throw "pkg-config could not find static aom. Check C:\msys64\mingw32\lib\pkgconfig\aom.pc"
     }
 
     Write-Host "pkg-config static package found: aom"
@@ -328,7 +304,7 @@ $BuildScriptPath = Join-Path $RepoRoot "build_local_ffmpeg_static.generated.sh"
 $Script = @"
 set -euo pipefail
 
-export PATH=/ucrt64/bin:/usr/bin:`$PATH
+export PATH=/mingw32/bin:/usr/bin:`$PATH
 export HOME="$HomeMsys"
 export TMPDIR="$TmpMsys"
 export TMP="$TmpMsys"
@@ -376,23 +352,11 @@ grep -E '^CONFIG_STATIC=|^CONFIG_SHARED=' config.h || true
 
 echo ""
 echo "Configured encoders:"
-grep -E '^#define CONFIG_(LIBVPX_VP8|H264_MF|AV1_MF|LIBX264|LIBOPUS|LIBSVTAV1|LIBAOM_AV1)_ENCODER 1$' config_components.h config.h 2>/dev/null || true
-
-echo ""
-echo "Configured audio demuxers:"
-grep -E '^#define CONFIG_PCM_(F32LE|S32LE|S24LE|S16LE|U8)_DEMUXER 1$' config_components.h config.h 2>/dev/null || true
-
-echo ""
-echo "Configured audio decoders:"
-grep -E '^#define CONFIG_PCM_(F32LE|S32LE|S24LE|S16LE|U8)_DECODER 1$' config_components.h config.h 2>/dev/null || true
-
-echo ""
-echo "Configured muxers:"
-grep -E '^#define CONFIG_(IVF|H264|OPUS)_MUXER 1$' config_components.h config.h 2>/dev/null || true
+grep -E 'CONFIG_(LIBVPX_VP8|H264_MF|AV1_MF|LIBSVTAV1|LIBAOM_AV1)_ENCODER' config.h || true
 
 echo ""
 echo "Configured capture/conversion components:"
-grep -E 'CONFIG_(DDAGRAB|HWDOWNLOAD|SCALE|SCALE_D3D11|FORMAT|NULL|LUTRGB|ARESAMPLE)_FILTER|CONFIG_(SWSCALE|SWRESAMPLE)|CONFIG_(D3D11VA|DXVA2|MEDIAFOUNDATION)' config.h || true
+grep -E 'CONFIG_(DDAGRAB|HWDOWNLOAD|SCALE|SCALE_D3D11|FORMAT|NULL|LUTRGB)_FILTER|CONFIG_SWSCALE|CONFIG_(D3D11VA|DXVA2|MEDIAFOUNDATION)' config.h || true
 "@
 
 Save-TextUtf8NoBom -Path $BuildScriptPath -Text $Script
@@ -402,7 +366,7 @@ Write-Host "Final output directory: $OutputDir"
 Write-Host "Install prefix: $InstallPrefix"
 Write-Host "SVT-AV1 enabled: $($EnableSVTAV1.IsPresent)"
 Write-Host "libaom AV1 enabled: $($EnableAOMAV1.IsPresent)"
-Write-Host "Dependencies: MSYS2 UCRT64 toolchain, nasm, pkgconf/pkg-config, make, libvpx, libx264, libopus, Windows SDK MediaFoundation headers/libs."
+Write-Host "Dependencies: MSYS2 MINGW32 x86 toolchain, nasm, pkgconf/pkg-config, make, libvpx, Windows SDK MediaFoundation headers/libs."
 Write-Host "Generated MSYS2 build script: $BuildScriptPath"
 Write-Host "Windows manifest: $ManifestPath"
 Write-Host "Windows manifest object: $ManifestObjectPath"
@@ -418,8 +382,36 @@ if (!(Test-Path $BuiltExe)) {
     throw "Build finished but ffmpeg.exe was not found at $BuiltExe"
 }
 
+$ExeStream = [System.IO.File]::OpenRead($BuiltExe)
+try {
+    $ExeReader = New-Object System.IO.BinaryReader($ExeStream)
+
+    $ExeStream.Position = 0x3C
+    $PeHeaderOffset = $ExeReader.ReadInt32()
+
+    $ExeStream.Position = $PeHeaderOffset
+    $PeSignature = $ExeReader.ReadUInt32()
+    if ($PeSignature -ne 0x00004550) {
+        throw "Built ffmpeg.exe does not contain a valid PE signature."
+    }
+
+    $MachineType = $ExeReader.ReadUInt16()
+    if ($MachineType -ne 0x014C) {
+        throw ("Built ffmpeg.exe is not a 32-bit x86 executable. PE machine type: 0x{0:X4}" -f $MachineType)
+    }
+}
+finally {
+    if ($null -ne $ExeReader) {
+        $ExeReader.Dispose()
+    } else {
+        $ExeStream.Dispose()
+    }
+}
+
+Write-Host "Verified executable architecture: 32-bit x86 (PE machine type 0x014C)"
+
 $Encoders = (& $BuiltExe -hide_banner -encoders) -join "`n"
-foreach ($Encoder in @("libvpx", "libx264", "libopus", "h264_mf", "av1_mf")) {
+foreach ($Encoder in @("libvpx", "libx264", "h264_mf", "av1_mf")) {
     if ($Encoders -notmatch [regex]::Escape($Encoder)) {
         throw "Built ffmpeg.exe is missing encoder $Encoder"
     }
@@ -437,25 +429,6 @@ if ($EnableAOMAV1.IsPresent) {
     }
 }
 
-$Demuxers = (& $BuiltExe -hide_banner -demuxers) -join "`n"
-foreach ($Demuxer in @("f32le", "s32le", "s24le", "s16le", "u8")) {
-    if ($Demuxers -notmatch "(?m)^\s*D\s+$([regex]::Escape($Demuxer))(?:\s|$)") {
-        throw "Built ffmpeg.exe is missing demuxer $Demuxer"
-    }
-}
-
-$Decoders = (& $BuiltExe -hide_banner -decoders) -join "`n"
-foreach ($Decoder in @("pcm_f32le", "pcm_s32le", "pcm_s24le", "pcm_s16le", "pcm_u8")) {
-    if ($Decoders -notmatch "(?m)^\s*A\S*\s+$([regex]::Escape($Decoder))(?:\s|$)") {
-        throw "Built ffmpeg.exe is missing decoder $Decoder"
-    }
-}
-
-$Muxers = (& $BuiltExe -hide_banner -muxers) -join "`n"
-if ($Muxers -notmatch "(?m)^\s*E\s+opus(?:\s|$)") {
-    throw "Built ffmpeg.exe is missing muxer opus"
-}
-
 $Devices = (& $BuiltExe -hide_banner -devices) -join "`n"
 
 foreach ($Device in @("gdigrab", "lavfi")) {
@@ -464,19 +437,14 @@ foreach ($Device in @("gdigrab", "lavfi")) {
     }
 }
 
-$Filters = (& $BuiltExe -hide_banner -filters) -join "`n"
-if ($Filters -notmatch "(?m)^\s*\S+\s+aresample(?:\s|$)") {
-    throw "Built ffmpeg.exe is missing filter aresample"
-}
-
 $LddOutput = (& $Bash -lc "ldd '$(Convert-ToMsysPath $BuiltExe)'") -join "`n"
 
 Write-Host ""
 Write-Host "Runtime dependencies:"
 Write-Host $LddOutput
 
-if ($LddOutput -match "msys|ucrt64|libgcc|libstdc\+\+|libwinpthread|libvpx|libx264|libopus|libaom|SvtAv1") {
-    throw "ffmpeg.exe still depends on MSYS2/UCRT runtime DLLs. Some dependency was linked dynamically instead of statically."
+if ($LddOutput -match "msys|mingw32|libgcc|libstdc\+\+|libwinpthread|libvpx|libx264|libaom|SvtAv1") {
+    throw "ffmpeg.exe still depends on MSYS2/MINGW32 runtime DLLs. Some dependency was linked dynamically instead of statically."
 }
 
 # Safety cleanup: keep only ffmpeg.exe and DLL files in _ffmpeg_build.
@@ -502,7 +470,8 @@ if (!(Test-Path $ManifestObjectPath)) {
 }
 
 Write-Host ""
-Write-Host "FFmpeg static single-exe build completed."
+Write-Host "FFmpeg static 32-bit x86 single-exe build completed."
 Write-Host "Final output: $BuiltExe"
+Write-Host "Executable architecture: 32-bit x86"
 Write-Host "Embedded manifest source: $ManifestPath"
 Write-Host "Embedded DPI awareness: PerMonitorV2"
