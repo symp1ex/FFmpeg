@@ -907,7 +907,10 @@ static int ddagrab_config_props(AVFilterLink *outlink)
 
     dda->time_base  = av_inv_q(dda->framerate);
     dda->time_frame = av_gettime_relative() / av_q2d(dda->time_base);
-    dda->time_timeout = av_rescale_q(1, dda->time_base, (AVRational) { 1, 1000 }) / 2;
+    if (dda->dup_frames)
+        dda->time_timeout = 0;
+    else
+        dda->time_timeout = av_rescale_q(1, dda->time_base, (AVRational) { 1, 1000 }) / 2;
 
     if (dda->draw_mouse) {
         ret = init_render_resources(avctx);
