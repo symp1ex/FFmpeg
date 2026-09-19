@@ -220,6 +220,7 @@ $ConfigureArgs = @(
     "--enable-demuxer=pcm_s24le",
     "--enable-demuxer=pcm_s16le",
     "--enable-demuxer=pcm_u8",
+	"--enable-demuxer=rawvideo",
 
     "--enable-filter=ddagrab",
     "--enable-filter=hwdownload",
@@ -238,6 +239,7 @@ $ConfigureArgs = @(
     "--enable-decoder=pcm_s24le",
     "--enable-decoder=pcm_s16le",
     "--enable-decoder=pcm_u8",
+	"--enable-decoder=rawvideo",
 
     "--enable-encoder=libvpx_vp8",
     "--enable-encoder=h264_mf",
