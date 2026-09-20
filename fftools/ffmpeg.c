@@ -316,6 +316,18 @@ static int read_key(void)
 
 #define STDIN_POLL_INTERVAL_US 10000
 
+typedef struct RuntimeCommandState {
+    char line[256];
+    int len;
+} RuntimeCommandState;
+
+static RuntimeCommandState stdin_runtime_command;
+
+#if HAVE_PEEKNAMEDPIPE && HAVE_GETSTDHANDLE
+static HANDLE runtime_control_pipe = INVALID_HANDLE_VALUE;
+static RuntimeCommandState dedicated_runtime_command;
+#endif
+
 static void request_runtime_keyframe(const char *arg)
 {
     OutputStream *selected = NULL;
@@ -374,27 +386,154 @@ static int process_runtime_command_line(const char *line)
     return 0;
 }
 
-static int process_runtime_command_key(int key)
+static int process_runtime_command_key(RuntimeCommandState *state, int key)
 {
-    static char line[256];
-    static int len;
-
     if (key < 0)
         return 0;
 
-    if (!len && key != 'f')
+    if (!state->len && key != 'f')
         return 0;
 
     if (key == '\n' || key == '\r') {
-        line[len] = 0;
-        len = 0;
-        return process_runtime_command_line(line);
+        state->line[state->len] = 0;
+        state->len = 0;
+        return process_runtime_command_line(state->line);
     }
 
-    if (len < sizeof(line) - 1)
-        line[len++] = key;
+    if (state->len < sizeof(state->line) - 1)
+        state->line[state->len++] = key;
 
     return 1;
+}
+
+static void runtime_control_close(const char *reason);
+
+static int runtime_control_init(void)
+{
+    if (!runtime_control_handle)
+        return 0;
+
+#if HAVE_PEEKNAMEDPIPE && HAVE_GETSTDHANDLE
+    char *end = NULL;
+    unsigned long long value;
+    DWORD available;
+
+    errno = 0;
+    value = strtoull(runtime_control_handle, &end, 10);
+    if (errno || end == runtime_control_handle || *end || value > UINTPTR_MAX ||
+        (uintptr_t)value == (uintptr_t)INVALID_HANDLE_VALUE) {
+        av_log(NULL, AV_LOG_ERROR,
+               "Invalid runtime control handle '%s'\n", runtime_control_handle);
+        return AVERROR(EINVAL);
+    }
+
+    runtime_control_pipe = (HANDLE)(uintptr_t)value;
+    if (GetFileType(runtime_control_pipe) != FILE_TYPE_PIPE) {
+        av_log(NULL, AV_LOG_ERROR,
+               "Runtime control handle is not a pipe: %s\n", runtime_control_handle);
+        runtime_control_close(NULL);
+        return AVERROR(EINVAL);
+    }
+
+    if (!PeekNamedPipe(runtime_control_pipe, NULL, 0, NULL, &available, NULL) &&
+        GetLastError() != ERROR_BROKEN_PIPE) {
+        av_log(NULL, AV_LOG_ERROR,
+               "Runtime control handle is not a readable pipe: %s\n",
+               runtime_control_handle);
+        runtime_control_close(NULL);
+        return AVERROR(EINVAL);
+    }
+
+    av_log(NULL, AV_LOG_INFO, "Runtime control channel enabled\n");
+    return 0;
+#else
+    av_log(NULL, AV_LOG_ERROR,
+           "-runtime_control_handle is only supported on Windows\n");
+    return AVERROR(ENOSYS);
+#endif
+}
+
+static void runtime_control_close(const char *reason)
+{
+#if HAVE_PEEKNAMEDPIPE && HAVE_GETSTDHANDLE
+    if (runtime_control_pipe == INVALID_HANDLE_VALUE)
+        return;
+
+    if (!CloseHandle(runtime_control_pipe))
+        av_log(NULL, AV_LOG_WARNING,
+               "Failed to close runtime control channel: error %lu\n",
+               GetLastError());
+    runtime_control_pipe = INVALID_HANDLE_VALUE;
+
+    if (reason)
+        av_log(NULL, AV_LOG_INFO, "Runtime control channel %s\n", reason);
+#else
+    (void)reason;
+#endif
+}
+
+static int runtime_control_active(void)
+{
+#if HAVE_PEEKNAMEDPIPE && HAVE_GETSTDHANDLE
+    return runtime_control_pipe != INVALID_HANDLE_VALUE;
+#else
+    return 0;
+#endif
+}
+
+static int runtime_control_read_key(void)
+{
+#if HAVE_PEEKNAMEDPIPE && HAVE_GETSTDHANDLE
+    unsigned char ch;
+    DWORD available, read;
+
+    if (!runtime_control_active())
+        return -1;
+
+    if (!PeekNamedPipe(runtime_control_pipe, NULL, 0, NULL, &available, NULL)) {
+        DWORD error = GetLastError();
+
+        if (error == ERROR_BROKEN_PIPE) {
+            runtime_control_close("closed");
+        } else {
+            av_log(NULL, AV_LOG_WARNING,
+                   "Runtime control channel read failed: error %lu; disabling channel\n",
+                   error);
+            runtime_control_close(NULL);
+        }
+        return -1;
+    }
+    if (!available)
+        return -1;
+
+    if (!ReadFile(runtime_control_pipe, &ch, 1, &read, NULL) || read != 1) {
+        DWORD error = GetLastError();
+
+        if (error == ERROR_BROKEN_PIPE) {
+            runtime_control_close("closed");
+        } else {
+            av_log(NULL, AV_LOG_WARNING,
+                   "Runtime control channel read failed: error %lu; disabling channel\n",
+                   error);
+            runtime_control_close(NULL);
+        }
+        return -1;
+    }
+
+    return ch;
+#else
+    return -1;
+#endif
+}
+
+static void check_runtime_control(void)
+{
+#if HAVE_PEEKNAMEDPIPE && HAVE_GETSTDHANDLE
+    int key;
+
+    while ((key = runtime_control_read_key()) >= 0)
+        process_runtime_command_key(&dedicated_runtime_command, key);
+#endif
 }
 
 static int decode_interrupt_cb(void *ctx)
@@ -406,6 +545,8 @@ const AVIOInterruptCB int_cb = { decode_interrupt_cb, NULL };
 
 static void ffmpeg_cleanup(int ret)
 {
+    runtime_control_close(NULL);
+
     if ((print_graphs || print_graphs_file) && nb_output_files > 0)
         print_filtergraphs(filtergraphs, nb_filtergraphs, input_files, nb_input_files, output_files, nb_output_files);
 
@@ -440,6 +581,7 @@ static void ffmpeg_cleanup(int ret)
     hw_device_free_all();
 
     av_freep(&filter_nbthreads);
+    av_freep(&runtime_control_handle);
 
     av_freep(&print_graphs_file);
     av_freep(&print_graphs_format);
@@ -923,7 +1065,7 @@ static int check_keyboard_interaction(int64_t cur_time)
     }else
         key = -1;
     while (key >= 0) {
-        if (process_runtime_command_key(key)) {
+        if (process_runtime_command_key(&stdin_runtime_command, key)) {
             key = read_key();
             continue;
         }
@@ -991,6 +1133,10 @@ static int transcode(Scheduler *sch)
     int ret = 0;
     int64_t timer_start, transcode_ts = 0;
 
+    ret = runtime_control_init();
+    if (ret < 0)
+        return ret;
+
     print_stream_maps();
 
     atomic_store(&transcode_init_done, 1);
@@ -1005,7 +1151,8 @@ static int transcode(Scheduler *sch)
 
     timer_start = av_gettime_relative();
 
-    while (!sch_wait(sch, stdin_interaction && stats_period > STDIN_POLL_INTERVAL_US ?
+    while (!sch_wait(sch, (stdin_interaction || runtime_control_active()) &&
+                     stats_period > STDIN_POLL_INTERVAL_US ?
                      STDIN_POLL_INTERVAL_US : stats_period,
                      &transcode_ts)) {
         int64_t cur_time= av_gettime_relative();
@@ -1017,6 +1164,8 @@ static int transcode(Scheduler *sch)
         if (stdin_interaction)
             if (check_keyboard_interaction(cur_time) < 0)
                 break;
+
+        check_runtime_control();
 
         /* dump report by using the output first video and audio streams */
         print_report(0, timer_start, cur_time, transcode_ts);

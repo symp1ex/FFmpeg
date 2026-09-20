@@ -69,6 +69,7 @@ int exit_on_error     = 0;
 int abort_on_flags    = 0;
 int print_stats       = -1;
 int stdin_interaction = 1;
+char *runtime_control_handle;
 float max_error_rate  = 2.0/3;
 char *filter_nbthreads;
 int filter_complex_nbthreads = 0;
@@ -1653,6 +1654,9 @@ const OptionDef options[] = {
     { "stdin",                  OPT_TYPE_BOOL, OPT_EXPERT,
         { &stdin_interaction },
       "enable or disable interaction on standard input" },
+    { "runtime_control_handle", OPT_TYPE_STRING, OPT_EXPERT,
+        { &runtime_control_handle },
+      "read runtime control commands from an inherited Windows pipe handle", "handle" },
     { "timelimit",              OPT_TYPE_FUNC, OPT_FUNC_ARG | OPT_EXPERT,
         { .func_arg = opt_timelimit },
         "set max runtime in seconds in CPU user time", "limit" },

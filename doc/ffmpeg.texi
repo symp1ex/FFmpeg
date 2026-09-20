@@ -1440,6 +1440,20 @@ ffmpeg is in the background process group. Roughly the same result can
 be achieved with @code{ffmpeg ... < /dev/null} but it requires a
 shell.
 
+@item -runtime_control_handle @var{handle} (@emph{global})
+On Windows, read high-level runtime control commands from the inherited,
+readable pipe @code{HANDLE} whose unsigned decimal value is @var{handle}.
+The option is disabled by default. The parent process makes only the read end
+inheritable, passes it in an explicit process handle list, retains the
+non-inheritable write end, and closes its local copy of the read end immediately
+after creating ffmpeg. ffmpeg owns and closes the inherited read handle. Closing
+the write end disables the control channel without stopping the encode.
+
+Commands are ASCII lines terminated by LF or CRLF. The supported command is
+@code{force_keyframe}, optionally followed by an output stream index. It uses
+the same handling as the interactive stdin command. When standard input is a
+media input, also specify @code{-nostdin} so it is used exclusively for media.
+
 @item -debug_ts (@emph{global})
 Print timestamp/latency information. It is off by default. This option is
 mostly useful for testing and debugging purposes, and the output

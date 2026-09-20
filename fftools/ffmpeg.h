@@ -752,6 +752,7 @@ extern int abort_on_flags;
 extern int print_stats;
 extern int64_t stats_period;
 extern int stdin_interaction;
+extern char *runtime_control_handle;
 extern AVIOContext *progress_avio;
 extern float max_error_rate;
 
